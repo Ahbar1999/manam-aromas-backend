@@ -10,9 +10,59 @@ import (
 	"context"
 	"os"	
 	"github.com/jackc/pgx/v5/pgxpool"	
-	// "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5"
 	"strings"
+	"time"
 )
+
+type Report struct {
+	id int  	
+	sample_name string 
+	test_datetime time.Time
+	feature_1 string
+	feature_2 string
+	feature_3 string
+	feature_4 string
+	report_filepath string	
+	final_verdict bool
+}
+
+func (report *Report) setId(id int) {
+	report.id = id
+} 
+
+func (report *Report) setSampleName(name string) {
+	report.sample_name = name 
+} 
+
+func (report *Report) setTestTimestamp(timestamp time.Time) {
+	report.test_datetime = timestamp 
+} 
+
+func (report *Report) setFeature(id int, value string) {
+	switch id {
+		case 1:
+			report.feature_1 = value
+		case 2:
+			report.feature_2 = value
+		case 3:
+			report.feature_3 = value
+		case 4:
+			report.feature_4 = value
+	}
+}
+
+func (report *Report) setFilePath(path string) {
+	cwd, _ := os.Getwd()
+	report.report_filepath = cwd + path 
+}
+
+func (report *Report) setFinalVerdict(verdict bool) {
+	report.final_verdict = verdict
+}
+
+var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
+var dbpool *pgxpool.Pool
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	var response []byte
@@ -21,6 +71,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		parsed, _ := url.Parse(r.RequestURI)
 		q := parsed.Query()
 		// use queryDb() to get
+		
 		response, _ = json.Marshal(map[string]string{"hello": strings.Join(q["name"], "")})	
 	} else {
 		response = []byte("Recieved post request")	
@@ -89,96 +140,167 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func listReports(w http.ResponseWriter, r *http.Request) {
+	query := `
+		SELECT * FROM "Reports"
+	`
+	// currently this just returns nil	
+	result := queryDb(query)
+	// ok
+	w.WriteHeader(200)
+	// send data
+	encoder := json.NewEncoder(w)
+	fmt.Println("Recieved result: ")
+	// fmt.Println(result)
+	// fmt.Println(result[0].test_datetime)
+	encoder.Encode(result)
+}
+
+
 /*
 	bool-chan uwu (◕‿◕✿)
 */
 func runServer(done chan bool) {
 	fmt.Println("Running server, listening on port: 8080")
-	// http.ListenAndServe(":8080", nil)
 	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/upload", uploadHandler)	
+	http.HandleFunc("/upload", uploadHandler)
+	http.HandleFunc("/list", listReports)	
 	log.Fatal(http.ListenAndServe(":8080", nil))
 	// send the done signal	
 	done<- true
 }
 
 // use this function to run queries
-func queryDb(dbpool *pgxpool.Pool) {
-	/*
-	var row pgx.Row
-	
-	var result string	
-	row = dbpool.QueryRow(context.Background(), "SELECT to_regclass('Posts')")
-	if err != nil {
-		fmt.Println("Error occured while querying: \n", err);	
-	}
-	row.Scan(&result)
-	fmt.Println("Result of table exists", result)	
-	*/
-	
-	/*
+func queryDb(query string) []Report {
 	var rows pgx.Rows
-	rows, err = dbpool.Query(context.Background(), "SELECT * FROM \"Posts\"")
-	if err != nil {
-		fmt.Println("Error occured while querying: \n", err);	
-	}	
-	
-	// read return of query
-	for ;; {
-		if prs := rows.Next(); prs {
-			values, _ := rows.Values()
-			fmt.Println(values)
-		} else {
-			// if no more values present
-			break	
-		}	
+	var err error
+	reports := make([]Report, 0)	
+
+	if prs := strings.Contains(query, "SELECT"); prs {
+		// fmt.Println("SELECT query request recieved")	
+		rows, err = dbpool.Query(context.Background(), query)
+		if err != nil {
+			fmt.Println("Error occured while querying: \n", err);	
+			return nil	
+		}
+	} else {
+		// create, insert, update kind of queries
+		ct, err := dbpool.Exec(context.Background(), query)	
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error occured while querying: %v\n", err);
+			return nil 
+		}
+		fmt.Println("Command Tag returned: ", ct.String())
+		return nil	
 	} 
-	*/
+
+	// read return of query
+	for r := 0; rows.Next(); r += 1 {
+		// var result string
+		values, err := rows.Values()
+		
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error occured while extracting values from rows: %v\n", err)	
+			return reports	
+		}	
+		fmt.Println("iterating over row: ", r)
+		var report Report	
+		// fmt.Println(values)
+		for i, value := range values {
+			fmt.Fprintf(os.Stdout, "%v of type: %T, ", value, value);
+			// fmt.Println("%v of type: %T", value, value)
+			switch i {
+				case 0:
+					report.setId(int(value.(int32)))
+				case 1:
+					report.setSampleName(string(value.(string)))	
+				case 2:
+					report.setTestTimestamp(time.Time(value.(time.Time)))
+				case 3, 4, 5, 6:
+					report.setFeature(i, string(value.(string)))	
+				case 7:
+					report.setFilePath(string(value.(string)))	
+				case 8:
+					report.setFinalVerdict(bool(value.(bool)))	
+			}
+		}	
+		fmt.Println()
+		reports = append(reports, report)	
+	} 
+
+	return reports 
 }
 
 func seedTableAndData(dbpool *pgxpool.Pool) {
-	dbpool.Exec(context.Background(),
+	
+	commandTag, err := dbpool.Exec(context.Background(),
 		`CREATE TABLE IF NOT EXISTS "Reports" (
-			id SERIAL CONSTRAINT PRIMARY KEY
-			sample_name VARCHAR(20)
+			id SERIAL PRIMARY KEY,
+			sample_name VARCHAR(20),
 			test_datetime TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			feature_1 VARCHAR(50) CONSTRAINT NOT_NULL,
+			feature_1 VARCHAR(50) NOT NULL,
 			feature_2 VARCHAR(50),
 			feature_3 VARCHAR(50),
 			feature_4 VARCHAR(50),
-			report_filepath TEXT	
-			final_verdict BOOLEAN  CONSTRAINT NOT_NULL 
+			report_filepath TEXT UNIQUE,	
+			final_verdict BOOLEAN NOT NULL 
 		)`);
-
-	// test the db/table dummy data existe
-	dbpool.Exec(context.Background(), 
-		`INSERT INTO TABLE "Reports" (sample_name, feature_1, feature_2, feature_3, feature_4, report_filepath, final_verdict) VALUES ("test", "test", "test", "test", "test", "/tmp/test.txt", true )	
+	
+	fmt.Println("\nCREATE TABLE command tag returned: ", commandTag.String())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
+		os.Exit(1)	
+	}
+	
+	// test the db/table dummy data
+	/*
+	commandTag, err = dbpool.Exec(context.Background(), 
+		`INSERT INTO "Reports"(id, sample_name, test_datetime, feature_1, feature_2, feature_3, feature_4, report_filepath, final_verdict) 
+					  VALUES (DEFAULT, 'test', DEFAULT, 'test', 'test', 'test', 'test', '/tmp/test.txt', true)	
 		`);
 
-	row := dbpool.QueryRow(context.Background(),
-		`SELECT * FROM "Reports"`)
+	fmt.Println("INSERT command tag returned: ", commandTag.String())	
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
+		os.Exit(1)
+	}
+	*/
+
+	var rows pgx.Rows
+	rows, err = dbpool.Query(context.Background(), "SELECT * FROM \"Reports\"")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v\n", err)
+		os.Exit(1)	
+	}	
 	
-	var result string
-	row.Scan(&result)
-	
-	fmt.Println("\n Result received after running seed: ", result) 	
+	fmt.Println("Result received after running seed:")
+	// parse the rows into Record struct objects 	
+	for ;rows.Next(); {
+		values, err := rows.Values()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error returned while reading values from rows: %v\n", err)
+			break	
+		}
+		// prints nothing 
+		fmt.Println(values) 	
+	}
 }
 
 func main() {
 	// start server
 	done := make(chan bool)
 	go runServer(done)
-	
 	// run database driver, connect to db
-	URI := "postgresql://localhost:5432/postgres?user=postgres&password=1234";
-	dbpool, err := pgxpool.New(context.Background(), URI)
+	// URI := "postgresql://localhost:5432/postgres?user=postgres&password=1234	
+	var err error	
+	dbpool, err = pgxpool.New(context.Background(), URI)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to create connection pool: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Ping successful: ", dbpool.Ping(context.Background()) == nil)
 	
-	seedTableAndData(dbpool)	
+	// seedTableAndData(dbpool)	
 	
 	defer dbpool.Close()
 	// defer terminating pool until the end of main
