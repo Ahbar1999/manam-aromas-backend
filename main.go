@@ -13,52 +13,59 @@ import (
 	"github.com/jackc/pgx/v5"
 	"strings"
 	"time"
+	"path/filepath"
 )
 
+/*
+	TODO:
+		2. Move Report and its implementation into a different module/file"
+*/
+
 type Report struct {
-	id int  	
-	sample_name string 
-	test_datetime time.Time
-	feature_1 string
-	feature_2 string
-	feature_3 string
-	feature_4 string
-	report_filepath string	
-	final_verdict bool
+	Id 				int			`json:"id"`  	
+	Sample_name 	string		`json:"sample_name"`  
+	Test_datetime 	time.Time	`json:"test_datetime"` 
+	Feature_1 		string		`json:"feature_1"` 			 	
+	Feature_2 		string		`json:"feature_2"`
+	Feature_3 		string		`json:"feature_3"`
+	Feature_4 		string		`json:"feature_4"`
+	Report_filepath string		`json:"report"`
+	Final_verdict 	bool		`json:"final_verdict"`
 }
 
 func (report *Report) setId(id int) {
-	report.id = id
+	report.Id = id
 } 
 
 func (report *Report) setSampleName(name string) {
-	report.sample_name = name 
+	report.Sample_name = name 
 } 
 
 func (report *Report) setTestTimestamp(timestamp time.Time) {
-	report.test_datetime = timestamp 
+	report.Test_datetime = timestamp 
 } 
 
 func (report *Report) setFeature(id int, value string) {
 	switch id {
 		case 1:
-			report.feature_1 = value
+			report.Feature_1 = value
 		case 2:
-			report.feature_2 = value
+			report.Feature_2 = value
 		case 3:
-			report.feature_3 = value
+			report.Feature_3 = value
 		case 4:
-			report.feature_4 = value
+			report.Feature_4 = value
 	}
 }
 
 func (report *Report) setFilePath(path string) {
 	cwd, _ := os.Getwd()
-	report.report_filepath = cwd + path 
+	// filepath.FromSlash helps maintain platform compatible path syntax
+	report.Report_filepath = cwd + filepath.FromSlash(path) 
 }
 
 func (report *Report) setFinalVerdict(verdict bool) {
-	report.final_verdict = verdict
+	report.Final_verdict = verdict
 }
 
 var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
@@ -145,15 +152,14 @@ func listReports(w http.ResponseWriter, r *http.Request) {
 		SELECT * FROM "Reports"
 	`
 	// currently this just returns nil	
-	result := queryDb(query)
+	result := queryDb(query)	
+	encoder := json.NewEncoder(w)
 	// ok
 	w.WriteHeader(200)
+	// fmt.Println("Recieved result: ")
+	fmt.Println(result)
 	// send data
-	encoder := json.NewEncoder(w)
-	fmt.Println("Recieved result: ")
-	// fmt.Println(result)
-	// fmt.Println(result[0].test_datetime)
-	encoder.Encode(result)
+	encoder.Encode(result)	
 }
 
 
@@ -161,11 +167,12 @@ func listReports(w http.ResponseWriter, r *http.Request) {
 	bool-chan uwu (◕‿◕✿)
 */
 func runServer(done chan bool) {
-	fmt.Println("Running server, listening on port: 8080")
+	port := "3030"
+	fmt.Println("Running server, listening on port: ", port)
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/upload", uploadHandler)
 	http.HandleFunc("/list", listReports)	
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe( ":" + port, nil))
 	// send the done signal	
 	done<- true
 }
@@ -217,7 +224,7 @@ func queryDb(query string) []Report {
 				case 2:
 					report.setTestTimestamp(time.Time(value.(time.Time)))
 				case 3, 4, 5, 6:
-					report.setFeature(i, string(value.(string)))	
+					report.setFeature(i - 2, string(value.(string)))	
 				case 7:
 					report.setFilePath(string(value.(string)))	
 				case 8:
@@ -252,8 +259,7 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 		os.Exit(1)	
 	}
 	
-	// test the db/table dummy data
-	/*
+	// test the db/table dummy data	
 	commandTag, err = dbpool.Exec(context.Background(), 
 		`INSERT INTO "Reports"(id, sample_name, test_datetime, feature_1, feature_2, feature_3, feature_4, report_filepath, final_verdict) 
 					  VALUES (DEFAULT, 'test', DEFAULT, 'test', 'test', 'test', 'test', '/tmp/test.txt', true)	
@@ -263,8 +269,7 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
 		os.Exit(1)
-	}
-	*/
+	}	
 
 	var rows pgx.Rows
 	rows, err = dbpool.Query(context.Background(), "SELECT * FROM \"Reports\"")
