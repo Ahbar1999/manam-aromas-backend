@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"fmt"
+	"bytes"
 	"net/http"
 	"log"
 	"encoding/json"
@@ -70,6 +71,31 @@ func (report *Report) setFinalVerdict(verdict bool) {
 
 var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
 var dbpool *pgxpool.Pool
+
+
+func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		// 404- Bad Request
+		w.WriteHeader(400)
+		w.Write([]byte("make GET req with \"filepath\" parameter"))
+		return
+	}
+
+	parsed, _ := url.Parse(r.RequestURI)
+	q := parsed.Query()
+	fn := strings.Join(q["filepath"], "")
+	fmt.Println("Sending file with filename: ")
+	fmt.Println(filepath.Base(fn))
+	data, err := os.ReadFile(fn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v while reading filepath: %v\n", err, fn)  
+	}
+	
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fn)))
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, bytes.NewReader(data))	
+}
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	var response []byte
@@ -172,6 +198,7 @@ func runServer(done chan bool) {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/upload", uploadHandler)
 	http.HandleFunc("/list", listReports)	
+	http.HandleFunc("/download", downloadFileHandler)	
 	log.Fatal(http.ListenAndServe( ":" + port, nil))
 	// send the done signal	
 	done<- true
