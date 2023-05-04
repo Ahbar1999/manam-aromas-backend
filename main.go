@@ -15,63 +15,16 @@ import (
 	"strings"
 	"time"
 	"path/filepath"
+	// "github.com/golang-jwt/jwt/v4"	
 )
 
 /*
 	TODO:
-		2. Move Report and its implementation into a different module/file"
 */
 
-type Report struct {
-	Id 				int			`json:"id"`  	
-	Sample_name 	string		`json:"sample_name"`  
-	Test_datetime 	time.Time	`json:"test_datetime"` 
-	Feature_1 		string		`json:"feature_1"` 			 	
-	Feature_2 		string		`json:"feature_2"`
-	Feature_3 		string		`json:"feature_3"`
-	Feature_4 		string		`json:"feature_4"`
-	Report_filepath string		`json:"report"`
-	Final_verdict 	bool		`json:"final_verdict"`
-}
-
-func (report *Report) setId(id int) {
-	report.Id = id
-} 
-
-func (report *Report) setSampleName(name string) {
-	report.Sample_name = name 
-} 
-
-func (report *Report) setTestTimestamp(timestamp time.Time) {
-	report.Test_datetime = timestamp 
-} 
-
-func (report *Report) setFeature(id int, value string) {
-	switch id {
-		case 1:
-			report.Feature_1 = value
-		case 2:
-			report.Feature_2 = value
-		case 3:
-			report.Feature_3 = value
-		case 4:
-			report.Feature_4 = value
-	}
-}
-
-func (report *Report) setFilePath(path string) {
-	cwd, _ := os.Getwd()
-	// filepath.FromSlash helps maintain platform compatible path syntax
-	report.Report_filepath = cwd + filepath.FromSlash(path) 
-}
-
-func (report *Report) setFinalVerdict(verdict bool) {
-	report.Final_verdict = verdict
-}
 
 var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
 var dbpool *pgxpool.Pool
-
 
 func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
@@ -187,13 +140,15 @@ func listReports(w http.ResponseWriter, r *http.Request) {
 	// send data
 	encoder.Encode(result)	
 }
-
-
 /*
 	bool-chan uwu (◕‿◕✿)
 */
 func runServer(done chan bool) {
-	port := "3030"
+	port := os.Getenv("PORT")
+	if port == "" {
+		fmt.Fprintf(os.Stderr, "PORT env variable not set\n")
+		done<-true
+	}
 	fmt.Println("Running server, listening on port: ", port)
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/upload", uploadHandler)
