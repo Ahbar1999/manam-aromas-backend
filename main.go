@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 	"path/filepath"
-	// "github.com/golang-jwt/jwt/v4"	
+	"github.com/golang-jwt/jwt/v4"	
 )
 
 /*
@@ -25,6 +25,7 @@ import (
 
 var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
 var dbpool *pgxpool.Pool
+var hmacSampleSecret []byte = []byte("secret_key")
 
 func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
@@ -271,6 +272,44 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 		// prints nothing 
 		fmt.Println(values) 	
 	}
+}
+
+func authToken(tokenString string) error {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error){	
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
+		// return hmacSampleSecret as the key to parse tokenString with
+		return hmacSampleSecret, nil	
+	})
+	
+	if !token.Valid {
+		return err
+	}	
+	
+	return nil 
+}
+
+func getNewToken() string {
+	// token without claims	
+	token := jwt.New(jwt.SigningMethodHS256)
+
+	tokenString, err := token.SignedString(hmacSampleSecret)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "New token couldnt be created ERROR: %v", err)
+	}
+	fmt.Println("New token created", tokenString, err)
+
+	return tokenString
+}
+
+func checkCredentials(username, password string) bool {
+	// create a Users table in the database
+	// get users and authenticate against them 
+
+	// this is temporary 
+	return username == "ahbar" && password == "1234"	
 }
 
 func main() {
