@@ -20,6 +20,7 @@ import (
 
 /*
 	TODO:
+		1. Add a middleware that does authentication before calling any url handler   
 */
 
 
@@ -140,24 +141,6 @@ func listReports(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(result)
 	// send data
 	encoder.Encode(result)	
-}
-/*
-	bool-chan uwu (◕‿◕✿)
-*/
-func runServer(done chan bool) {
-	port := os.Getenv("PORT")
-	if port == "" {
-		fmt.Fprintf(os.Stderr, "PORT env variable not set\n")
-		done<-true
-	}
-	fmt.Println("Running server, listening on port: ", port)
-	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/upload", uploadHandler)
-	http.HandleFunc("/list", listReports)	
-	http.HandleFunc("/download", downloadFileHandler)	
-	log.Fatal(http.ListenAndServe( ":" + port, nil))
-	// send the done signal	
-	done<- true
 }
 
 // use this function to run queries
@@ -297,9 +280,9 @@ func getNewToken() string {
 
 	tokenString, err := token.SignedString(hmacSampleSecret)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "New token couldnt be created ERROR: %v", err)
+		fmt.Fprintf(os.Stderr, "New token couldnt be created; ERROR: %v", err)
 	}
-	fmt.Println("New token created", tokenString, err)
+	fmt.Println("New token created\n", tokenString, err)
 
 	return tokenString
 }
@@ -311,6 +294,84 @@ func checkCredentials(username, password string) bool {
 	// this is temporary 
 	return username == "ahbar" && password == "1234"	
 }
+
+func sendErrorResponse(w http.ResponseWriter, responseCode int, response []byte) {
+	w.WriteHeader(responseCode)
+	w.Write(response)
+}
+
+/*
+	bool-chan uwu (◕‿◕✿)
+*/
+func middleWare(w http.ResponseWriter, r *http.Request) {		
+	// create new token upon request 
+	if r.URL.Path == "/auth" {
+		err := r.ParseForm()	
+		if err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, []byte("Authentication details not provided!\n Send a post request with form values for username and password\n"))	
+			return
+		}	
+		// check for token or credentials	
+		if ok := checkCredentials(r.Form["username"][0], r.Form["password"][0]); !ok {
+			sendErrorResponse(w, http.StatusForbidden, []byte("Authentication failed!"))		
+			return 
+		}
+		
+		// generate new token and return it for client use
+		newTokenString := struct { 
+			TokenString string `json:"token_string"`
+		}{
+			getNewToken(),
+		}
+		// encode it as json and send it
+		encoder := json.NewEncoder(w)
+		w.WriteHeader(http.StatusOK)
+		// now on the recieving side token can be accessed with token_string key
+		encoder.Encode(newTokenString)
+		return
+	}
+	
+	// otherwise authenticate token
+	// TODO
+
+	
+	// if authentication is successful continue processing the request
+	switch r.URL.Path {
+	case "/":
+		indexHandler(w, r)
+	case "/upload":
+		uploadHandler(w, r)
+	case "/list":
+		listReports(w, r)
+	case "/download":
+		downloadFileHandler(w, r)
+	default:
+		sendErrorResponse(w, http.StatusNotFound, []byte("The resource you requested does not exist"))
+	}
+}
+
+func runServer(done chan bool) {
+	port := os.Getenv("PORT")
+	if port == "" {
+		fmt.Fprintf(os.Stderr, "PORT env variable not set\n")
+		done<-true
+	}
+
+	fmt.Println("Running server, listening on port: ", port)
+	
+	// route all requests to middleWare	
+	http.HandleFunc("", middleWare)
+	/*
+	http.HandleFunc("/", indexHandler)
+	http.HandleFunc("/upload", uploadHandler)
+	http.HandleFunc("/list", listReports)	
+	http.HandleFunc("/download", downloadFileHandler)	
+	*/	
+	log.Fatal(http.ListenAndServe( ":" + port, nil))
+	// send the done signal	
+	done<- true
+}
+
 
 func main() {
 	// start server
