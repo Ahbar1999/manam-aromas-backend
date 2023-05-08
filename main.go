@@ -258,11 +258,10 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 }
 
 func authToken(tokenString string) error {	
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error){	
+	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{},func(token *jwt.Token) (interface{}, error){	
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-
 		// return hmacSampleSecret as the key to parse tokenString with
 		return hmacSampleSecret, nil	
 	})
@@ -270,14 +269,46 @@ func authToken(tokenString string) error {
 	if !token.Valid {
 		return err
 	}	
-	
+
+	if claims, ok := token.Claims.(*CustomClaims); ok {
+		if claims.IssuedAt == nil || claims.ExpiresAt == nil {		
+			return fmt.Errorf("sorry, your auth token doesn't carry valid claims! \nPlease create a new one")	
+		}	
+		fmt.Printf("Authenticating %v \n", claims.Audience)
+		fmt.Println("Bearing token issued at: ", claims.IssuedAt.String())
+		//  check wether token expired or not
+		// although this validation happens automatically somewhere while passing the token around it think 
+		if ok := time.Now().Before(claims.ExpiresAt.Time); !ok {
+			return fmt.Errorf("sorry, your auth token has expired \nPlease create a new one")	
+		}	
+	} else {
+		return fmt.Errorf("sorry, couldnt parse claims from your auth token \nPlease create a new one")	
+	}
+
 	return nil 
 }
 
-func getNewToken() string {
-	// token without claims	
-	token := jwt.New(jwt.SigningMethodHS256)
+type CustomClaims struct {
+	Greetings string `json:"greetings"`
+	jwt.RegisteredClaims
+} 
 
+func getNewToken(username string) string {
+	// generate a tokee with claims
+	claims := CustomClaims{
+		"Hello User!",
+		jwt.RegisteredClaims {
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+			// expires within 15 minute(s)
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+			Issuer: "Admin",
+			Audience: []string{username},	
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		
+	// sign the token with hmac using out secret string
 	tokenString, err := token.SignedString(hmacSampleSecret)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "New token couldnt be created; ERROR: %v", err)
@@ -304,7 +335,6 @@ func sendErrorResponse(w http.ResponseWriter, responseCode int, response []byte)
 	bool-chan uwu (◕‿◕✿)
 */
 func middleWare(w http.ResponseWriter, r *http.Request) {		
-	fmt.Println("In the middleware")
 	// create new token upon request 	
 	if r.URL.Path == "/auth" {
 		err := r.ParseForm()	
@@ -323,7 +353,7 @@ func middleWare(w http.ResponseWriter, r *http.Request) {
 		newTokenString := struct { 
 			TokenString string `json:"token_string"`
 		}{
-			getNewToken(),
+			getNewToken(r.Form.Get("username")),
 		}
 		// encode it as json and send it
 		encoder := json.NewEncoder(w)
@@ -341,7 +371,7 @@ func middleWare(w http.ResponseWriter, r *http.Request) {
 		return	
 	}
 	
-	fmt.Printf("Recieved token string %v\n", tokenString)
+	// fmt.Printf("Recieved token string %v\n", tokenString)
 	if err := authToken(tokenString); err != nil {
 		sendErrorResponse(w, http.StatusForbidden, []byte(err.Error()))
 		return	
@@ -349,7 +379,7 @@ func middleWare(w http.ResponseWriter, r *http.Request) {
 
 	// authenticated
 	// continue processing the req
-	fmt.Println("Resource requested on: ", r.URL.Path)
+	// fmt.Println("Resource requested on: ", r.URL.Path)
 	switch r.URL.Path {
 	case "/":
 		indexHandler(w, r)
