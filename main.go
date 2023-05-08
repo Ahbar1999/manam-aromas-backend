@@ -38,9 +38,9 @@ func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	parsed, _ := url.Parse(r.RequestURI)
 	q := parsed.Query()
-	fn := strings.Join(q["filepath"], "")
+	fn := filepath.FromSlash(strings.Join(q["filepath"], ""))
 	fmt.Println("Sending file with filename: ")
-	fmt.Println(filepath.Base(fn))
+	fmt.Println(fn)
 	data, err := os.ReadFile(fn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: %v while reading filepath: %v\n", err, fn)  
@@ -257,7 +257,7 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 	}
 }
 
-func authToken(tokenString string) error {
+func authToken(tokenString string) error {	
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error){	
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -304,15 +304,17 @@ func sendErrorResponse(w http.ResponseWriter, responseCode int, response []byte)
 	bool-chan uwu (◕‿◕✿)
 */
 func middleWare(w http.ResponseWriter, r *http.Request) {		
-	// create new token upon request 
+	fmt.Println("In the middleware")
+	// create new token upon request 	
 	if r.URL.Path == "/auth" {
 		err := r.ParseForm()	
 		if err != nil {
 			sendErrorResponse(w, http.StatusBadRequest, []byte("Authentication details not provided!\n Send a post request with form values for username and password\n"))	
 			return
 		}	
-		// check for token or credentials	
-		if ok := checkCredentials(r.Form["username"][0], r.Form["password"][0]); !ok {
+		// check for token or credentials
+		fmt.Println(r.Form)
+		if ok := checkCredentials(r.Form.Get("username"), r.Form.Get("password")); !ok {
 			sendErrorResponse(w, http.StatusForbidden, []byte("Authentication failed!"))		
 			return 
 		}
@@ -332,10 +334,22 @@ func middleWare(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// otherwise authenticate token
-	// TODO
-
+	tokenString := r.Header.Get("Authorization")
 	
-	// if authentication is successful continue processing the request
+	if tokenString == "" {
+		sendErrorResponse(w, http.StatusBadRequest, []byte("jwt Auth token not provided"))	
+		return	
+	}
+	
+	fmt.Printf("Recieved token string %v\n", tokenString)
+	if err := authToken(tokenString); err != nil {
+		sendErrorResponse(w, http.StatusForbidden, []byte(err.Error()))
+		return	
+	}
+
+	// authenticated
+	// continue processing the req
+	fmt.Println("Resource requested on: ", r.URL.Path)
 	switch r.URL.Path {
 	case "/":
 		indexHandler(w, r)
@@ -360,13 +374,8 @@ func runServer(done chan bool) {
 	fmt.Println("Running server, listening on port: ", port)
 	
 	// route all requests to middleWare	
-	http.HandleFunc("", middleWare)
-	/*
-	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/upload", uploadHandler)
-	http.HandleFunc("/list", listReports)	
-	http.HandleFunc("/download", downloadFileHandler)	
-	*/	
+	http.HandleFunc("/", middleWare)
+	
 	log.Fatal(http.ListenAndServe( ":" + port, nil))
 	// send the done signal	
 	done<- true
