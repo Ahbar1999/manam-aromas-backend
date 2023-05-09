@@ -16,16 +16,18 @@ import (
 	"time"
 	"path/filepath"
 	"github.com/golang-jwt/jwt/v4"	
+	"github.com/brianvoe/gofakeit/v6"
 )
 
 /*
 	TODO:
-		1. Add a middleware that does authentication before calling any url handler   
+		add fake data
 */
 
 
 var URI string = "postgresql://localhost:5432/postgres?user=postgres&password=1234"
 var dbpool *pgxpool.Pool
+// could probably load this as an env variable 
 var hmacSampleSecret []byte = []byte("secret_key")
 
 func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +51,7 @@ func downloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fn)))
 	w.WriteHeader(http.StatusOK)
+	// copy bytes from "data" stream to http "writer" 
 	io.Copy(w, bytes.NewReader(data))	
 }
 
@@ -205,9 +208,16 @@ func queryDb(query string) []Report {
 }
 
 func seedTableAndData(dbpool *pgxpool.Pool) {
-	
-	commandTag, err := dbpool.Exec(context.Background(),
-		`CREATE TABLE IF NOT EXISTS "Reports" (
+	 	
+	commandTag, err := dbpool.Exec(context.Background(), "DROP TABLE IF EXISTS \"Reports\"")	
+	fmt.Println("\nDROP TABLE command tag returned: ", commandTag.String())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
+		os.Exit(1)	
+	}	
+
+	commandTag, err = dbpool.Exec(context.Background(),
+		`CREATE TABLE "Reports" (
 			id SERIAL PRIMARY KEY,
 			sample_name VARCHAR(20),
 			test_datetime TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -224,19 +234,24 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
 		os.Exit(1)	
 	}
+
+	// insert fake data into the db/table
+	for i := 0; i < 25; i += 1 {
+		var fakeReport Report 
+		gofakeit.Struct(&fakeReport)		
+		stmt := `INSERT INTO "Reports" (id, sample_name, test_datetime, feature_1, feature_2, feature_3, feature_4, report_filepath, final_verdict) 
+						  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)	
+			`
+
+		_, err = dbpool.Exec(context.Background(), stmt, i, fakeReport.Sample_name, fakeReport.Test_datetime, fakeReport.Feature_1, fakeReport.Feature_2, fakeReport.Feature_3, fakeReport.Feature_4, "/tmp/" + fakeReport.Report_filepath + ".txt", fakeReport.Final_verdict);
 	
-	// test the db/table dummy data	
-	commandTag, err = dbpool.Exec(context.Background(), 
-		`INSERT INTO "Reports"(id, sample_name, test_datetime, feature_1, feature_2, feature_3, feature_4, report_filepath, final_verdict) 
-					  VALUES (DEFAULT, 'test', DEFAULT, 'test', 'test', 'test', 'test', '/tmp/test.txt', true)	
-		`);
-
-	fmt.Println("INSERT command tag returned: ", commandTag.String())	
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
-		os.Exit(1)
-	}	
-
+		// fmt.Println("INSERT command tag returned: ", commandTag.String())	
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error returned while executing query: %v", err)
+			os.Exit(1)
+		}	
+	} 
+		
 	var rows pgx.Rows
 	rows, err = dbpool.Query(context.Background(), "SELECT * FROM \"Reports\"")
 	if err != nil {
@@ -258,7 +273,7 @@ func seedTableAndData(dbpool *pgxpool.Pool) {
 }
 
 func authToken(tokenString string) error {	
-	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{},func(token *jwt.Token) (interface{}, error){	
+	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error){	
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -426,7 +441,7 @@ func main() {
 	}
 	fmt.Println("Ping successful: ", dbpool.Ping(context.Background()) == nil)
 	
-	// seedTableAndData(dbpool)	
+	seedTableAndData(dbpool)	
 	
 	defer dbpool.Close()
 	// defer terminating pool until the end of main
